@@ -1,6 +1,8 @@
 # ansible-redmine
 Ansible deployment of Redmine V2.5.1 issue tracker with Backlog v1.0.6 plugin on Ubuntu 14.04
+
 *http://www.redmine.org/*
+
 *http://www.redminebacklogs.net/*
 
 ## Vagrant test :

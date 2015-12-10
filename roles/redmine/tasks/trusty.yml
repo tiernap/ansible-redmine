@@ -1,0 +1,181 @@
+---
+#install mysql
+- include: mysql.yml
+
+- name: check for mysql
+  command: which mysql
+
+- name: add ppa
+  apt_repository: repo="ppa:ondrej/redmine" state=present update_cache=yes
+
+- name: install packages
+  apt: name={{ item }} state=present update_cache=yes cache_valid_time=500
+  with_items:
+    - apache2 
+    - software-properties-common 
+    - imagemagick 
+    - libmagickwand-dev 
+    - ruby-rmagick
+    - libapache2-mod-passenger
+    - ruby-mysql2
+    - ruby2.0
+    - libruby2.0
+    - ruby2.0-dev
+   
+- name: remove ruby1.9.1 packages
+  apt: name={{ item }} state=absent
+  with_items:
+    - ruby1.9.1
+    - libruby1.9.1
+    - ruby1.9.1-dev
+
+
+- name: enable apache modules
+  apache2_module: state=present name={{ item }}
+  with_items:
+    - passenger
+  notify: reload apache2
+
+- name: check for redmine install
+  command: ls /etc/apache2/sites-enabled/redmine.conf
+  register: result
+  ignore_errors: true
+
+- name: debconf for redmine
+  debconf: name=redmine question='redmine/instances/default/{{ item }}' value='false' vtype='boolean'
+  with_items:
+    - dbconfig-upgrade
+    - dbconfig-reinstall
+    - dbconfig-install
+    - dbc_update
+    - dbc_install
+  ignore_errors: true
+
+- name: install redmine
+  apt: name={{ item }} state=present
+  with_items:
+    - redmine
+    - redmine-mysql
+    
+- name: install bundler gem
+  gem: name=bundler state=latest user_install=no
+  when: result.rc != 0
+
+- name: install mysql2 adapter gem
+  gem: name=activerecord-mysql2-adapter state=latest user_install=no
+  when: result.rc != 0
+  
+- name: create redmine database
+  mysql_db: db=redmine state=present
+    
+- name: create redmine database user
+  mysql_user: state=present name=redmine host=localhost password={{ redmine_dbpass }} priv=redmine.*:ALL
+
+- name: configure redmine database connection
+  template: src=database.yml dest=/etc/redmine/default/database.yml
+  notify: reload apache2
+
+- name: configure redmine
+  template: src=configuration.yml dest=/etc/redmine/default/configuration.yml
+  notify: reload apache2
+  
+- name: install gems
+  command: bundle install --without development test chdir=/usr/share/redmine
+  when: result.rc != 0
+  
+- name: generate secret rails token
+  command: bundle exec rake generate_secret_token chdir=/usr/share/redmine
+  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+
+- name: migrate database
+  command: bundle exec rake db:migrate chdir=/usr/share/redmine
+  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+
+- name: load default data
+  command: rake redmine:load_default_data REDMINE_LANG=en chdir=/usr/share/redmine
+  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+  
+- name: configure passenger.conf
+  template: src=passenger.conf dest=/etc/apache2/mods-available/passenger.conf
+  notify: reload apache2
+  
+- name: configure security.conf
+  template: src=security.conf dest=/etc/apache2/conf-available/security.conf
+  notify: reload apache2
+
+- name: configure environment.rb
+  template: src=environment.rb dest=/usr/share/redmine/config/environment.rb
+  notify: reload apache2
+  
+- name: create webfolder symlink
+  file: src=/usr/share/redmine/public path=/var/www/redmine state=link
+  
+- name: change permissions of redmine folder
+  file: path=/usr/share/redmine mode=0755
+
+- name: configure redmine apache site
+  template: src=redmine.conf dest=/etc/apache2/sites-available/redmine.conf
+  notify: reload apache2
+  
+- name: disable default site
+  command: a2dissite 000-default removes=/etc/apache2/sites-enabled/000-default.conf
+  notify: reload apache2
+
+- name: enable redmine site
+  command: a2ensite redmine creates=/etc/apache2/sites-enabled/redmine.conf
+  notify: reload apache2
+
+- name: install packages for backlogs plugin
+  apt: name={{ item }} state=present
+  with_items:
+    - ruby2.0-dev 
+    - git 
+    - g++ 
+    - make
+    - libxslt-dev 
+    - libxml2-dev
+    
+- name: install gems
+  command: bundle install --without development test chdir=/usr/share/redmine
+  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+
+- name: create plugins directory
+  file: path=/usr/share/redmine/plugins state=directory mode=0755
+  
+- name: clone Backlogs repo
+  git: repo=http://github.com/backlogs/redmine_backlogs.git dest=/usr/share/redmine/plugins/redmine_backlogs
+  when: result.rc != 0
+  
+- name: checkout v1.0.6
+  command: git checkout v1.0.6 chdir=/usr/share/redmine/plugins/redmine_backlogs
+  when: result.rc != 0
+
+- name: deliver Gemfile
+  template: src=Gemfile dest=/usr/share/redmine/plugins/redmine_backlogs/Gemfile
+
+- name: install gems
+#  command: bundle install --without development test chdir=/usr/share/redmine/plugins/redmine_backlogs
+  command: bundle install chdir=/usr/share/redmine/plugins/redmine_backlogs
+#  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+  
+- name: migrate db
+  command: bundle exec rake db:migrate chdir=/usr/share/redmine/plugins/redmine_backlogs
+  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+
+
+- name: install Backlogs plugin
+  command: bundle exec rake redmine:backlogs:install story_trackers=bug,feature,support task_tracker=task chdir=/usr/share/redmine/plugins/redmine_backlogs
+  environment: { RAILS_ENV: production }
+  when: result.rc != 0
+  
+- name: create plugins  symlink
+  file: src=/var/cache/redmine/default/plugin_assets path=/usr/share/redmine/public/plugin_assets state=link
+
+- name: chmod on gemfile.lock
+  file: path=/usr/share/redmine/Gemfile.lock mode=0777

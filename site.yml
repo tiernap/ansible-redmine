@@ -1,0 +1,12 @@
+---
+- hosts: redmine
+  sudo: True
+  tags:
+    - redmine
+
+  roles:
+    - { role: ../roles/redmine }
+
+
+
+

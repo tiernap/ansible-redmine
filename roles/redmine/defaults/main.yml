@@ -1,0 +1,9 @@
+# redmine variables
+redmine_dbpass: password
+redmine_URL: "{{ ansible_fqdn }}"
+# uncommend below to configure URI
+#RailsBaseURI: /redmine
+
+# mysql variables
+mysql_root_password: password
+mysql_bind_address: 0.0.0.0

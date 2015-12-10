@@ -1,0 +1,12 @@
+---
+- name: restart apache2
+  action: service name=apache2 state=restarted
+  
+- name: reload apache2
+  action: service name=apache2 state=reloaded
+  
+- name: enable passenger.conf and reload apache2
+  command: a2enconf passenger && service apache2 reload
+
+- name: restart mysql
+  action: service name=mysql state=restarted
